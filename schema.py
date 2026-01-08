@@ -1,57 +1,46 @@
 """
-WWTP Equipment Tool - Database Schema
-SQLite schema definition for equipment management system
+Database schema for WWTP Equipment Management Tool
+SQLite database structure with 5 core tables
 """
 
 import sqlite3
-import os
+from pathlib import Path
 
-def create_database(db_path='database/wwtp_equipment.db'):
-    """
-    Create SQLite database with all tables and indexes.
-    
-    Args:
-        db_path: Path to database file (will be created if doesn't exist)
-    
-    Returns:
-        sqlite3.Connection object
-    """
-    
-    # Ensure database directory exists
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    
-    # Connect to database (creates file if doesn't exist)
+
+def get_db_path():
+    """Get the path to the database file"""
+    db_dir = Path(__file__).parent
+    db_dir.mkdir(parents=True, exist_ok=True)
+    return db_dir / "wwtp_equipment.db"
+
+
+def create_schema():
+    """Create all database tables and indexes"""
+    db_path = get_db_path()
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
-    # Enable foreign key constraints
-    cursor.execute("PRAGMA foreign_keys = ON;")
-    
-    # ========================================
-    # TABLE 1: PROJECTS
-    # ========================================
+    # 1. PROJECTS TABLE
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS projects (
             project_id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             client TEXT,
             job_number TEXT UNIQUE,
-            phase TEXT CHECK(phase IN ('Design', 'Bid', 'Construction', 'Closeout')),
+            phase TEXT,  -- Design / Bid / Construction
             created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             notes TEXT
         )
     """)
     
-    # ========================================
-    # TABLE 2: EQUIPMENT MASTER
-    # ========================================
+    # 2. EQUIPMENT MASTER TABLE (normalized catalog)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS equipment_master (
             equipment_id INTEGER PRIMARY KEY AUTOINCREMENT,
             manufacturer TEXT NOT NULL,
             model TEXT NOT NULL,
-            equipment_type TEXT NOT NULL,
-            equipment_subtype TEXT,
+            equipment_type TEXT NOT NULL,  -- Pump, Mixer, Blower, etc.
+            equipment_subtype TEXT,         -- Submersible, Centrifugal, etc.
             
             -- Key parameters (as extracted)
             power_hp REAL,
@@ -65,46 +54,40 @@ def create_database(db_path='database/wwtp_equipment.db'):
             flow_gpm_verified REAL,
             head_ft_verified REAL,
             
-            -- Other specifications
+            -- Other specs
             material TEXT,
             connection_size TEXT,
             weight_lbs REAL,
             
             notes TEXT,
             created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            
             UNIQUE(manufacturer, model)
         )
     """)
     
-    # ========================================
-    # TABLE 3: PROJECT EQUIPMENT INSTANCES
-    # ========================================
+    # 3. PROJECT EQUIPMENT INSTANCES TABLE
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS project_equipment (
             instance_id INTEGER PRIMARY KEY AUTOINCREMENT,
             project_id INTEGER NOT NULL,
             equipment_id INTEGER NOT NULL,
             
-            pid_tag TEXT,
-            status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('existing', 'new', 'replace', 'remove', 'TBD')),
+            pid_tag TEXT,  -- Manually entered P&ID tag (e.g., "P-101")
+            status TEXT NOT NULL DEFAULT 'new',  -- existing/new/replace/remove/TBD
             quantity INTEGER DEFAULT 1,
-            location TEXT,
+            location TEXT,  -- Building, room, elevation
             notes TEXT,
             
-            selected_quote_id INTEGER,
+            selected_quote_id INTEGER,  -- FK to quotes table
             
-            FOREIGN KEY (project_id) REFERENCES projects(project_id) ON DELETE CASCADE,
-            FOREIGN KEY (equipment_id) REFERENCES equipment_master(equipment_id) ON DELETE RESTRICT,
-            FOREIGN KEY (selected_quote_id) REFERENCES quotes(quote_id) ON DELETE SET NULL,
-            
+            FOREIGN KEY (project_id) REFERENCES projects(project_id),
+            FOREIGN KEY (equipment_id) REFERENCES equipment_master(equipment_id),
+            FOREIGN KEY (selected_quote_id) REFERENCES quotes(quote_id),
             UNIQUE(project_id, pid_tag)
         )
     """)
     
-    # ========================================
-    # TABLE 4: QUOTES / PRICING
-    # ========================================
+    # 4. QUOTES / PRICING TABLE
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS quotes (
             quote_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -116,27 +99,25 @@ def create_database(db_path='database/wwtp_equipment.db'):
             lead_time_weeks INTEGER,
             quote_date DATE,
             quote_number TEXT,
-            quote_file_path TEXT,
+            quote_file_path TEXT,  -- Link to PDF quote
             
-            is_current BOOLEAN DEFAULT 1,
+            is_current BOOLEAN DEFAULT 1,  -- Flag for latest quote
             notes TEXT,
             created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             
-            FOREIGN KEY (equipment_id) REFERENCES equipment_master(equipment_id) ON DELETE CASCADE
+            FOREIGN KEY (equipment_id) REFERENCES equipment_master(equipment_id)
         )
     """)
     
-    # ========================================
-    # TABLE 5: DOCUMENTS
-    # ========================================
+    # 5. DOCUMENTS TABLE (cut sheets, specs, submittals)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS documents (
             document_id INTEGER PRIMARY KEY AUTOINCREMENT,
             equipment_id INTEGER NOT NULL,
             
-            document_type TEXT NOT NULL CHECK(document_type IN ('cutsheet', 'spec', 'submittal', 'quote', 'manual', 'other')),
+            document_type TEXT NOT NULL,  -- cutsheet/spec/submittal/quote/manual
             file_name TEXT NOT NULL,
-            file_path TEXT NOT NULL,
+            file_path TEXT NOT NULL,  -- Relative path: data/files/equipment_001/cutsheet.pdf
             file_size_kb INTEGER,
             version TEXT,
             document_date DATE,
@@ -144,65 +125,57 @@ def create_database(db_path='database/wwtp_equipment.db'):
             notes TEXT,
             uploaded_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             
-            FOREIGN KEY (equipment_id) REFERENCES equipment_master(equipment_id) ON DELETE CASCADE
+            FOREIGN KEY (equipment_id) REFERENCES equipment_master(equipment_id)
         )
     """)
     
-    # ========================================
     # INDEXES FOR PERFORMANCE
-    # ========================================
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_project_equipment ON project_equipment(project_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_equipment_quotes ON quotes(equipment_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_equipment_docs ON documents(equipment_id)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_current_quotes ON quotes(equipment_id, is_current) WHERE is_current = 1")
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_project_equipment 
+        ON project_equipment(project_id)
+    """)
+    
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_equipment_quotes 
+        ON quotes(equipment_id)
+    """)
+    
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_equipment_docs 
+        ON documents(equipment_id)
+    """)
     
     conn.commit()
+    conn.close()
     
-    print(f"✅ Database created successfully at: {db_path}")
-    print(f"📊 Tables created: projects, equipment_master, project_equipment, quotes, documents")
-    
-    return conn
+    print(f"✓ Database created at: {db_path}")
+    return db_path
 
 
-def reset_database(db_path='database/wwtp_equipment.db'):
-    """
-    Drop all tables and recreate database (WARNING: deletes all data)
+def reset_database():
+    """Drop all tables and recreate schema (USE WITH CAUTION)"""
+    db_path = get_db_path()
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
     
-    Args:
-        db_path: Path to database file
-    """
+    # Drop all tables
+    tables = ['documents', 'quotes', 'project_equipment', 'equipment_master', 'projects']
+    for table in tables:
+        cursor.execute(f"DROP TABLE IF EXISTS {table}")
     
-    if os.path.exists(db_path):
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        # Drop all tables
-        cursor.execute("DROP TABLE IF EXISTS documents")
-        cursor.execute("DROP TABLE IF EXISTS quotes")
-        cursor.execute("DROP TABLE IF EXISTS project_equipment")
-        cursor.execute("DROP TABLE IF EXISTS equipment_master")
-        cursor.execute("DROP TABLE IF EXISTS projects")
-        
-        conn.commit()
-        conn.close()
-        
-        print("⚠️  All tables dropped")
+    # Drop indexes
+    indexes = ['idx_project_equipment', 'idx_equipment_quotes', 'idx_equipment_docs']
+    for index in indexes:
+        cursor.execute(f"DROP INDEX IF EXISTS {index}")
     
-    # Recreate database
-    return create_database(db_path)
+    conn.commit()
+    conn.close()
+    
+    # Recreate schema
+    create_schema()
+    print("✓ Database reset complete")
 
 
 if __name__ == "__main__":
-    # Test database creation
-    conn = create_database()
-    
-    # Verify tables exist
-    cursor = conn.cursor()
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    tables = cursor.fetchall()
-    
-    print("\n📋 Tables in database:")
-    for table in tables:
-        print(f"   - {table[0]}")
-    
-    conn.close()
+    # Test schema creation
+    create_schema()
