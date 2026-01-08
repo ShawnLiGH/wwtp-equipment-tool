@@ -1,209 +1,225 @@
-# WWTP Equipment Tool
+# WWTP Equipment Management Tool
 
-A Streamlit-based web application for managing wastewater treatment plant (WWTP) equipment databases, project equipment lists, cost estimates, and submittal packages.
+A Streamlit-based application for managing wastewater treatment plant equipment specifications, project tracking, cost estimates, and submittal generation.
 
-## Features
+## 🎯 Features
 
-- **📦 Equipment Master Catalog**: Centralized database of pumps, mixers, blowers, and other WWTP equipment
-- **🏗️ Project Management**: Create and manage multiple WWTP projects
-- **📋 Equipment List Builder**: Build project-specific equipment lists with P&ID tags
-- **💰 Cost Estimates**: Generate cost summaries based on equipment quotes (Coming in Phase 4)
-- **📄 Submittal Packages**: Create submittal document packages (Coming in Phase 4)
+### Phase 1 - Foundation (Current)
+- ✅ **Equipment Master Catalog** - Centralized database of equipment with specifications
+- ✅ **Project Management** - Track multiple WWTP projects
+- ✅ **Equipment List Builder** - Assign equipment to projects with P&ID tags
+- ✅ **SQLite Database** - Lightweight, file-based storage
+- ✅ **Search & Filter** - Find equipment quickly
 
-## Tech Stack
+### Upcoming Phases
+- 📋 **Cost Estimation** - Generate formatted cost estimates (Phase 4)
+- 📄 **Submittal Generator** - Create equipment submittal packages (Phase 4)
+- 📊 **Professional Excel Exports** - Formatted equipment lists and estimates
+- 📦 **PDF Management** - Store and organize cut sheets and specifications
 
-- **Frontend**: Streamlit
-- **Database**: SQLite
-- **Data Processing**: pandas
-- **Document Generation**: openpyxl, PyPDF2, python-docx
-
-## Installation
+## 🚀 Quick Start
 
 ### Prerequisites
-
 - Python 3.8 or higher
-- pip (Python package manager)
+- pip (Python package installer)
 
-### Setup
+### Installation
 
-1. **Clone the repository**
-```bash
-git clone <your-repo-url>
-cd wwtp-equipment-tool
-```
+1. **Clone or download this repository**
+   ```bash
+   git clone <your-repo-url>
+   cd wwtp-equipment-tool
+   ```
 
 2. **Create virtual environment** (recommended)
-```bash
-python -m venv venv
-
-# Activate on Windows
-venv\Scripts\activate
-
-# Activate on Mac/Linux
-source venv/bin/activate
-```
+   ```bash
+   python -m venv venv
+   
+   # Activate on Windows:
+   venv\Scripts\activate
+   
+   # Activate on Mac/Linux:
+   source venv/bin/activate
+   ```
 
 3. **Install dependencies**
-```bash
-pip install -r requirements.txt
-```
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-4. **Create required directories**
-```bash
-mkdir -p data/files exports database
-```
+4. **Run the application**
+   ```bash
+   streamlit run app.py
+   ```
 
-5. **Initialize database**
-```bash
-python database/schema.py
-```
+5. **Open in browser**
+   - The app will automatically open at `http://localhost:8501`
+   - If not, navigate to that URL manually
 
-## Running the Application
+## 📖 User Guide
 
-### Local Development
+### 1. Equipment Master Tab
+Add equipment to your master catalog:
 
-```bash
-streamlit run app.py
-```
+**Adding Equipment:**
+1. Fill in manufacturer and model (required)
+2. Select equipment type (Pump, Mixer, Blower, etc.)
+3. Enter specifications (HP, flow, head, voltage)
+4. Add any notes
+5. Click "Add Equipment"
 
-The application will open in your browser at `http://localhost:8501`
+**Searching:**
+- Use the search box to filter by manufacturer, model, or type
+- Results update in real-time
 
-### Deploy to Streamlit Cloud
+### 2. Projects Tab
+Manage your WWTP projects:
 
-1. Push code to GitHub
-2. Go to [share.streamlit.io](https://share.streamlit.io)
-3. Connect your GitHub repository
-4. Deploy!
+**Creating a Project:**
+1. Enter project name (required)
+2. Add client, job number, and phase
+3. Add project notes
+4. Click "Create Project"
 
-## Project Structure
+**Setting Active Project:**
+- Click "Set as Active Project" on any project
+- Active project appears in the sidebar
+
+### 3. Equipment List Builder Tab
+Build equipment lists for your active project:
+
+**Adding Equipment to Project:**
+1. Ensure a project is active (check sidebar)
+2. Select equipment from the master catalog
+3. Assign a P&ID tag (e.g., "P-101")
+4. Set status (new/existing/replace/remove)
+5. Enter quantity and location
+6. Click "Add to Project"
+
+**Equipment Status Options:**
+- **new** - New equipment to be installed
+- **existing** - Equipment already in place
+- **replace** - Replacement of existing equipment
+- **remove** - Equipment to be removed
+- **TBD** - Status to be determined
+
+### 4. Cost Estimate Tab
+*Coming in Phase 4* - Will generate formatted cost estimates
+
+### 5. Submittal Generator Tab
+*Coming in Phase 4* - Will create submittal packages
+
+### 6. Settings Tab
+View database information and statistics
+
+## 🗂️ Project Structure
 
 ```
 wwtp-equipment-tool/
 │
-├── app.py                          # Main Streamlit application
-├── requirements.txt                # Python dependencies
-├── .gitignore                      # Git ignore rules
-├── README.md                       # This file
+├── app.py                      # Main Streamlit application
+├── requirements.txt            # Python dependencies
+├── .gitignore                  # Git ignore rules
+├── README.md                   # This file
 │
 ├── database/
-│   ├── __init__.py                 # Package init
-│   ├── schema.py                   # SQLite schema definition
-│   ├── models.py                   # Database CRUD operations
-│   └── wwtp_equipment.db           # SQLite database (auto-created)
+│   ├── __init__.py            # Package initialization
+│   ├── schema.py              # Database schema definition
+│   ├── models.py              # Database CRUD operations
+│   └── wwtp_equipment.db      # SQLite database (created on first run)
 │
-├── modules/                        # Future: Business logic modules
-│   ├── __init__.py
-│   ├── equipment_master.py         # Equipment operations
-│   ├── project_manager.py          # Project operations
-│   ├── cost_estimator.py           # Cost calculations
-│   ├── submittal_generator.py      # PDF generation
-│   └── utils.py                    # Helper functions
+├── modules/
+│   └── __init__.py            # Future business logic modules
 │
 ├── data/
-│   └── files/                      # PDF storage (gitignored)
-│       └── equipment_XXX/          # Equipment-specific folders
-│           ├── cutsheet.pdf
-│           └── submittal.pdf
+│   └── files/                 # PDF storage (organized by equipment ID)
 │
-└── exports/                        # Generated deliverables (gitignored)
+└── exports/                   # Generated deliverables
     ├── equipment_lists/
     ├── cost_estimates/
     └── submittals/
 ```
 
-## Database Schema
+## 💾 Database Schema
 
 The application uses SQLite with 5 main tables:
 
-1. **projects** - WWTP projects (client, job number, phase)
-2. **equipment_master** - Equipment catalog (manufacturer, model, specs)
-3. **project_equipment** - Project-specific equipment instances (P&ID tags, status)
-4. **quotes** - Equipment pricing and quotes
-5. **documents** - File metadata for PDFs (cut sheets, specs, submittals)
+1. **projects** - Project information (name, client, job number, phase)
+2. **equipment_master** - Equipment catalog (specs, manufacturers, models)
+3. **project_equipment** - Equipment instances in projects (P&ID tags, status, quantities)
+4. **quotes** - Pricing information for equipment
+5. **documents** - Document management (cut sheets, specs, submittals)
 
-## Usage
+## 🔧 Technical Details
 
-### 1. Add Equipment to Master Catalog
+### Tech Stack
+- **Streamlit** - Web application framework
+- **SQLite** - Embedded database
+- **pandas** - Data manipulation
+- **openpyxl** - Excel file generation
 
-1. Go to **Equipment Master** tab
-2. Fill in equipment details (manufacturer, model, type, specs)
-3. Click "Add Equipment"
+### Database Location
+- Database file: `database/wwtp_equipment.db`
+- Created automatically on first run
+- File-based (no server required)
 
-### 2. Create a Project
+### Data Storage
+- PDF files: `data/files/equipment_<id>/`
+- Exports: `exports/` directory
+- Organized by equipment ID and document type
 
-1. Go to **Projects** tab
-2. Enter project details (name, client, job number, phase)
-3. Click "Create Project"
+## 🐛 Troubleshooting
 
-### 3. Build Equipment List
+### Database Issues
+If you encounter database errors:
+```bash
+# Delete the database file to start fresh
+rm database/wwtp_equipment.db
 
-1. Select your project from the sidebar
-2. Go to **Equipment List Builder** tab
-3. Select equipment from master catalog
-4. Assign P&ID tag and status (new/existing/replace/remove)
-5. Set quantity and location
-6. Link to a quote if available
-7. Click "Add to Project"
+# Restart the application
+streamlit run app.py
+```
 
-### 4. Generate Cost Estimate (Coming in Phase 4)
+### Import Errors
+If modules can't be found:
+```bash
+# Ensure you're in the project directory
+cd wwtp-equipment-tool
 
-1. Select project
-2. Go to **Cost Estimate** tab
-3. Configure filters and options
-4. Export to Excel
+# Verify requirements are installed
+pip install -r requirements.txt
+```
 
-### 5. Create Submittal Package (Coming in Phase 4)
+### Port Already in Use
+If port 8501 is busy:
+```bash
+# Use a different port
+streamlit run app.py --server.port 8502
+```
 
-1. Select project
-2. Go to **Submittal Generator** tab
-3. Select equipment and document types
-4. Generate PDF package
+## 📋 Development Roadmap
 
-## Development Roadmap
+- [x] **Phase 1** - Foundation (database, basic UI)
+- [x] **Phase 2** - Equipment Master (CRUD operations)
+- [x] **Phase 3** - Project Management (equipment lists)
+- [ ] **Phase 4** - Deliverable Generation (cost estimates, submittals)
+- [ ] **Phase 5** - Polish & Enhancements (formatting, validation)
 
-### ✅ Phase 1: Foundation (Week 1)
-- [x] Database schema and models
-- [x] Basic Streamlit UI with tabs
-- [x] Project and equipment CRUD operations
+## 🤝 Contributing
 
-### 🔄 Phase 2: Equipment Master (Week 2)
-- [ ] File upload functionality for PDFs
-- [ ] Quote management interface
-- [ ] Equipment search and filtering
-- [ ] Edit/delete operations
+This is a custom tool for internal use. For questions or suggestions, contact the project maintainer.
 
-### ⏳ Phase 3: Project Management (Week 3)
-- [ ] Enhanced project equipment interface
-- [ ] Quote linking and selection
-- [ ] Data validation and error handling
+## 📄 License
 
-### ⏳ Phase 4: Deliverable Generation (Week 4)
-- [ ] Equipment list Excel export
-- [ ] Cost estimate calculations and formatting
-- [ ] PDF submittal package generation
-- [ ] Transmittal cover sheet
+Internal use only - proprietary software
 
-### ⏳ Phase 5: Polish (Week 5)
-- [ ] Professional Excel templates
-- [ ] Database backup/restore
-- [ ] Enhanced UI/UX
-- [ ] Documentation and testing
+## 🔗 Additional Resources
 
-## Contributing
-
-This is an internal tool for single-user demonstration purposes. For questions or suggestions, contact the development team.
-
-## License
-
-Internal use only - not for public distribution.
-
-## Support
-
-For issues or feature requests, please contact:
-- Email: [your-email]
-- GitHub Issues: [repo-url]/issues
+- [Streamlit Documentation](https://docs.streamlit.io/)
+- [SQLite Documentation](https://www.sqlite.org/docs.html)
+- [pandas Documentation](https://pandas.pydata.org/docs/)
 
 ---
 
-**Version**: 0.1.0 (Phase 1 - Foundation)  
-**Last Updated**: January 2026
+**Version:** 1.0 (Phase 1 - Foundation)  
+**Last Updated:** January 2026

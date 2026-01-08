@@ -1,16 +1,23 @@
 """
-WWTP Equipment Tool - Main Application
-Streamlit web interface for wastewater treatment plant equipment management
+WWTP Equipment Management Tool
+Main Streamlit Application
 """
 
 import streamlit as st
-import os
-from database import create_database, Database
-from database import models
+import pandas as pd
+from pathlib import Path
 
-# ============================================
-# PAGE CONFIGURATION
-# ============================================
+# Import database managers
+from database import (
+    create_schema,
+    ProjectManager,
+    EquipmentManager,
+    ProjectEquipmentManager,
+    QuoteManager,
+    DocumentManager
+)
+
+# Page configuration
 st.set_page_config(
     page_title="WWTP Equipment Tool",
     page_icon="🏭",
@@ -18,94 +25,84 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ============================================
-# INITIALIZE DATABASE
-# ============================================
-DB_PATH = 'database/wwtp_equipment.db'
-
+# Initialize database on first run
 @st.cache_resource
 def init_database():
-    """Initialize database connection (cached)"""
-    if not os.path.exists(DB_PATH):
-        create_database(DB_PATH)
-    db = Database(DB_PATH)
-    db.connect()
-    return db
+    """Initialize database and return managers"""
+    create_schema()
+    return {
+        'project': ProjectManager(),
+        'equipment': EquipmentManager(),
+        'project_equipment': ProjectEquipmentManager(),
+        'quote': QuoteManager(),
+        'document': DocumentManager()
+    }
 
+# Load database managers
 db = init_database()
 
-# ============================================
-# SESSION STATE INITIALIZATION
-# ============================================
+# Initialize session state
 if 'active_project_id' not in st.session_state:
     st.session_state.active_project_id = None
 
-if 'active_project_name' not in st.session_state:
-    st.session_state.active_project_name = None
-
-# ============================================
+# ============================================================================
 # SIDEBAR - PROJECT SELECTOR
-# ============================================
+# ============================================================================
+
 with st.sidebar:
     st.title("🏭 WWTP Equipment Tool")
     st.markdown("---")
     
-    # Active Project Display
+    # Project selector
     st.subheader("Active Project")
-    
-    projects = models.get_all_projects(db)
+    projects = db['project'].get_all_projects()
     
     if projects:
-        project_options = {f"{p['name']} ({p['job_number'] or 'No Job #'})": p['project_id'] 
+        project_options = {p['project_id']: f"{p['name']} ({p['job_number'] or 'No Job #'})" 
                           for p in projects}
-        project_options = {"[No Project Selected]": None, **project_options}
         
-        # Get current selection index
-        current_selection = "[No Project Selected]"
-        if st.session_state.active_project_id:
-            for key, value in project_options.items():
-                if value == st.session_state.active_project_id:
-                    current_selection = key
-                    break
-        
-        selected_project = st.selectbox(
-            "Select Project:",
+        selected_project_id = st.selectbox(
+            "Select Project",
             options=list(project_options.keys()),
-            index=list(project_options.keys()).index(current_selection),
-            key="project_selector"
+            format_func=lambda x: project_options[x],
+            index=list(project_options.keys()).index(st.session_state.active_project_id) 
+                  if st.session_state.active_project_id in project_options else 0
         )
         
-        st.session_state.active_project_id = project_options[selected_project]
+        if selected_project_id != st.session_state.active_project_id:
+            st.session_state.active_project_id = selected_project_id
+            st.rerun()
         
+        # Display active project info
         if st.session_state.active_project_id:
-            project = models.get_project(db, st.session_state.active_project_id)
-            st.session_state.active_project_name = project['name']
-            
-            st.success(f"✅ **{project['name']}**")
-            st.caption(f"Client: {project['client'] or 'N/A'}")
-            st.caption(f"Phase: {project['phase']}")
-        else:
-            st.session_state.active_project_name = None
-            st.info("No project selected")
+            active_project = db['project'].get_project(st.session_state.active_project_id)
+            st.success(f"**{active_project['name']}**")
+            if active_project['client']:
+                st.caption(f"Client: {active_project['client']}")
+            if active_project['phase']:
+                st.caption(f"Phase: {active_project['phase']}")
     else:
-        st.session_state.active_project_id = None
-        st.session_state.active_project_name = None
-        st.info("No projects created yet")
+        st.info("No projects yet. Create one in the Projects tab.")
     
     st.markdown("---")
     
-    # Database Stats
-    st.subheader("📊 Database Stats")
-    stats = models.get_database_stats(db)
-    st.metric("Equipment Items", stats['equipment_master'])
-    st.metric("Total Projects", stats['projects'])
-    st.metric("Total Quotes", stats['quotes'])
-    st.metric("Documents", stats['documents'])
+    # Quick stats
+    if st.session_state.active_project_id:
+        equipment_count = len(db['project_equipment'].get_project_equipment(
+            st.session_state.active_project_id
+        ))
+        st.metric("Equipment Items", equipment_count)
+    
+    # Database info
+    st.markdown("---")
+    st.caption("**Database Status**")
+    total_equipment = len(db['equipment'].get_all_equipment())
+    st.caption(f"📦 Equipment Master: {total_equipment} items")
+    st.caption(f"🏗️ Projects: {len(projects)} active")
 
-# ============================================
-# MAIN CONTENT - TABS
-# ============================================
-st.title("🏭 Wastewater Treatment Plant Equipment Tool")
+# ============================================================================
+# MAIN TABS
+# ============================================================================
 
 tabs = st.tabs([
     "📦 Equipment Master",
@@ -116,320 +113,329 @@ tabs = st.tabs([
     "⚙️ Settings"
 ])
 
-# ============================================
+# ============================================================================
 # TAB 1: EQUIPMENT MASTER
-# ============================================
+# ============================================================================
+
 with tabs[0]:
     st.header("📦 Equipment Master Catalog")
-    st.markdown("Manage your equipment database: add, search, edit equipment and attach documents.")
+    st.markdown("Manage your equipment database with specifications, documents, and pricing.")
     
     col1, col2 = st.columns([2, 1])
     
     with col1:
         st.subheader("Equipment List")
         
-        # Search bar
-        search_term = st.text_input("🔍 Search Equipment", placeholder="Search by manufacturer, model, or type...")
+        # Search and filter
+        search_term = st.text_input("🔍 Search equipment", placeholder="Enter manufacturer, model, or type...")
         
         if search_term:
-            equipment_list = models.search_equipment(db, search_term)
+            equipment_list = db['equipment'].search_equipment(search_term)
         else:
-            equipment_list = models.get_all_equipment(db)
+            equipment_list = db['equipment'].get_all_equipment()
         
         if equipment_list:
-            st.write(f"**{len(equipment_list)} equipment items found**")
+            # Convert to DataFrame for display
+            df = pd.DataFrame(equipment_list)
             
-            for eq in equipment_list:
-                with st.expander(f"**{eq['manufacturer']} {eq['model']}** - {eq['equipment_type']}"):
-                    col_a, col_b = st.columns(2)
-                    
-                    with col_a:
-                        st.write(f"**Type:** {eq['equipment_type']}")
-                        if eq['equipment_subtype']:
-                            st.write(f"**Subtype:** {eq['equipment_subtype']}")
-                        st.write(f"**Power:** {eq['power_hp']} HP" if eq['power_hp'] else "**Power:** N/A")
-                        st.write(f"**Flow:** {eq['flow_gpm']} GPM" if eq['flow_gpm'] else "**Flow:** N/A")
-                    
-                    with col_b:
-                        st.write(f"**Head:** {eq['head_ft']} ft" if eq['head_ft'] else "**Head:** N/A")
-                        st.write(f"**Voltage:** {eq['voltage']}" if eq['voltage'] else "**Voltage:** N/A")
-                        st.write(f"**RPM:** {eq['rpm']}" if eq['rpm'] else "**RPM:** N/A")
-                    
-                    if eq['notes']:
-                        st.info(f"📝 {eq['notes']}")
-                    
-                    # Show documents count
-                    docs = models.get_equipment_documents(db, eq['equipment_id'])
-                    quotes = models.get_equipment_quotes(db, eq['equipment_id'])
-                    st.caption(f"📄 {len(docs)} documents | 💰 {len(quotes)} quotes")
+            # Select key columns for display
+            display_cols = ['equipment_id', 'manufacturer', 'model', 'equipment_type', 
+                          'power_hp', 'flow_gpm', 'head_ft', 'voltage']
+            display_df = df[[col for col in display_cols if col in df.columns]]
+            
+            st.dataframe(
+                display_df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "equipment_id": "ID",
+                    "manufacturer": "Manufacturer",
+                    "model": "Model",
+                    "equipment_type": "Type",
+                    "power_hp": st.column_config.NumberColumn("HP", format="%.1f"),
+                    "flow_gpm": st.column_config.NumberColumn("Flow (GPM)", format="%.0f"),
+                    "head_ft": st.column_config.NumberColumn("Head (ft)", format="%.1f"),
+                    "voltage": "Voltage"
+                }
+            )
+            
+            st.caption(f"Showing {len(equipment_list)} equipment items")
         else:
-            st.info("No equipment found. Add your first equipment item!")
+            st.info("No equipment found. Add equipment using the form on the right.")
     
     with col2:
-        st.subheader("➕ Add New Equipment")
+        st.subheader("Add New Equipment")
         
-        with st.form("add_equipment_form", clear_on_submit=True):
+        with st.form("add_equipment_form"):
             manufacturer = st.text_input("Manufacturer*", placeholder="e.g., Wilo")
-            model = st.text_input("Model*", placeholder="e.g., EMU FA 10.37-252")
-            equipment_type = st.selectbox("Equipment Type*", 
-                                         ["Pump", "Mixer", "Blower", "Screen", "Valve", 
-                                          "Instrumentation", "Other"])
+            model = st.text_input("Model*", placeholder="e.g., EMU KPR 100")
+            
+            equipment_type = st.selectbox(
+                "Equipment Type*",
+                options=["Pump", "Mixer", "Blower", "Screen", "Clarifier", "Filter", "Other"]
+            )
+            
             equipment_subtype = st.text_input("Subtype", placeholder="e.g., Submersible")
             
-            col_x, col_y = st.columns(2)
-            with col_x:
+            st.markdown("**Specifications**")
+            col_a, col_b = st.columns(2)
+            with col_a:
                 power_hp = st.number_input("Power (HP)", min_value=0.0, step=0.1, format="%.2f")
-                flow_gpm = st.number_input("Flow (GPM)", min_value=0.0, step=1.0, format="%.1f")
-                voltage = st.text_input("Voltage", placeholder="e.g., 460V")
+                flow_gpm = st.number_input("Flow (GPM)", min_value=0.0, step=1.0, format="%.0f")
+                voltage = st.text_input("Voltage", placeholder="e.g., 480V 3Ph")
             
-            with col_y:
-                head_ft = st.number_input("Head (ft)", min_value=0.0, step=1.0, format="%.1f")
+            with col_b:
+                head_ft = st.number_input("Head (ft)", min_value=0.0, step=0.1, format="%.1f")
                 rpm = st.number_input("RPM", min_value=0.0, step=1.0, format="%.0f")
+                material = st.text_input("Material", placeholder="e.g., Cast Iron")
             
-            notes = st.text_area("Notes", placeholder="Additional specifications or notes...")
+            notes = st.text_area("Notes", placeholder="Additional specifications or comments...")
             
-            submit = st.form_submit_button("Add Equipment", type="primary")
+            submit = st.form_submit_button("➕ Add Equipment", use_container_width=True)
             
             if submit:
                 if not manufacturer or not model or not equipment_type:
-                    st.error("Please fill in all required fields (*)")
+                    st.error("Please fill in required fields (Manufacturer, Model, Type)")
                 else:
                     try:
-                        eq_id = models.create_equipment(
-                            db, manufacturer, model, equipment_type,
-                            equipment_subtype=equipment_subtype if equipment_subtype else None,
+                        equipment_id = db['equipment'].create_equipment(
+                            manufacturer=manufacturer,
+                            model=model,
+                            equipment_type=equipment_type,
+                            equipment_subtype=equipment_subtype or None,
                             power_hp=power_hp if power_hp > 0 else None,
                             flow_gpm=flow_gpm if flow_gpm > 0 else None,
                             head_ft=head_ft if head_ft > 0 else None,
-                            voltage=voltage if voltage else None,
+                            voltage=voltage or None,
                             rpm=rpm if rpm > 0 else None,
-                            notes=notes if notes else None
+                            material=material or None,
+                            notes=notes or None
                         )
-                        st.success(f"✅ Equipment added successfully! (ID: {eq_id})")
+                        st.success(f"✓ Equipment added (ID: {equipment_id})")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Error adding equipment: {e}")
+                        st.error(f"Error adding equipment: {str(e)}")
 
-# ============================================
+# ============================================================================
 # TAB 2: PROJECTS
-# ============================================
+# ============================================================================
+
 with tabs[1]:
     st.header("🏗️ Project Management")
-    st.markdown("Create and manage wastewater treatment plant projects.")
     
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        st.subheader("Existing Projects")
+        st.subheader("Projects")
+        
+        projects = db['project'].get_all_projects()
         
         if projects:
-            for proj in projects:
-                with st.expander(f"**{proj['name']}** - {proj['phase']}", expanded=False):
-                    st.write(f"**Client:** {proj['client'] or 'N/A'}")
-                    st.write(f"**Job Number:** {proj['job_number'] or 'N/A'}")
-                    st.write(f"**Phase:** {proj['phase']}")
-                    st.write(f"**Created:** {proj['created_date']}")
+            for project in projects:
+                with st.expander(f"**{project['name']}** ({project['job_number'] or 'No Job #'})", 
+                               expanded=(project['project_id'] == st.session_state.active_project_id)):
                     
-                    if proj['notes']:
-                        st.info(f"📝 {proj['notes']}")
+                    col_a, col_b, col_c = st.columns(3)
                     
-                    # Show project equipment count
-                    eq_list = models.get_project_equipment_list(db, proj['project_id'])
-                    st.caption(f"📋 {len(eq_list)} equipment items in this project")
+                    with col_a:
+                        st.caption("**Client**")
+                        st.write(project['client'] or "—")
+                    
+                    with col_b:
+                        st.caption("**Phase**")
+                        st.write(project['phase'] or "—")
+                    
+                    with col_c:
+                        st.caption("**Created**")
+                        st.write(project['created_date'][:10] if project['created_date'] else "—")
+                    
+                    if project['notes']:
+                        st.caption("**Notes**")
+                        st.write(project['notes'])
+                    
+                    # Equipment count
+                    eq_count = len(db['project_equipment'].get_project_equipment(project['project_id']))
+                    st.info(f"📋 {eq_count} equipment items")
+                    
+                    # Actions
+                    if st.button(f"Set as Active Project", key=f"activate_{project['project_id']}"):
+                        st.session_state.active_project_id = project['project_id']
+                        st.rerun()
         else:
-            st.info("No projects created yet. Create your first project!")
+            st.info("No projects yet. Create your first project using the form on the right.")
     
     with col2:
-        st.subheader("➕ Create New Project")
+        st.subheader("Create New Project")
         
-        with st.form("create_project_form", clear_on_submit=True):
+        with st.form("create_project_form"):
             name = st.text_input("Project Name*", placeholder="e.g., Rio Del Oro WWTP Upgrade")
             client = st.text_input("Client", placeholder="e.g., City of Sacramento")
-            job_number = st.text_input("Job Number", placeholder="e.g., 2024-1234")
-            phase = st.selectbox("Phase", ["Design", "Bid", "Construction", "Closeout"])
-            notes = st.text_area("Notes", placeholder="Project description or notes...")
+            job_number = st.text_input("Job Number", placeholder="e.g., 2025-001")
+            phase = st.selectbox("Phase", options=["Design", "Bid", "Construction", "Closeout"])
+            notes = st.text_area("Notes", placeholder="Project description or special requirements...")
             
-            submit = st.form_submit_button("Create Project", type="primary")
+            submit = st.form_submit_button("➕ Create Project", use_container_width=True)
             
             if submit:
                 if not name:
-                    st.error("Project name is required")
+                    st.error("Please enter a project name")
                 else:
                     try:
-                        proj_id = models.create_project(
-                            db, name, client if client else None,
-                            job_number if job_number else None,
-                            phase, notes if notes else None
+                        project_id = db['project'].create_project(
+                            name=name,
+                            client=client or None,
+                            job_number=job_number or None,
+                            phase=phase,
+                            notes=notes or None
                         )
-                        st.success(f"✅ Project created successfully! (ID: {proj_id})")
+                        st.success(f"✓ Project created (ID: {project_id})")
+                        st.session_state.active_project_id = project_id
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Error creating project: {e}")
+                        st.error(f"Error creating project: {str(e)}")
 
-# ============================================
+# ============================================================================
 # TAB 3: EQUIPMENT LIST BUILDER
-# ============================================
+# ============================================================================
+
 with tabs[2]:
     st.header("📋 Equipment List Builder")
     
     if not st.session_state.active_project_id:
-        st.warning("⚠️ Please select a project from the sidebar first.")
+        st.warning("⚠️ Please select or create a project first (see Projects tab)")
     else:
-        st.markdown(f"**Building equipment list for:** {st.session_state.active_project_name}")
+        active_project = db['project'].get_project(st.session_state.active_project_id)
+        st.info(f"Building equipment list for: **{active_project['name']}**")
         
-        # Show current project equipment
-        project_equipment = models.get_project_equipment_list(db, st.session_state.active_project_id)
+        # Get current project equipment
+        project_equipment = db['project_equipment'].get_project_equipment(
+            st.session_state.active_project_id
+        )
         
-        col1, col2 = st.columns([2, 1])
+        col1, col2 = st.columns([3, 1])
         
         with col1:
-            st.subheader("Project Equipment List")
+            st.subheader("Project Equipment")
             
             if project_equipment:
-                st.write(f"**{len(project_equipment)} equipment items**")
+                df = pd.DataFrame(project_equipment)
                 
-                for pe in project_equipment:
-                    status_emoji = {
-                        'new': '🆕',
-                        'existing': '📦',
-                        'replace': '🔄',
-                        'remove': '🗑️',
-                        'TBD': '❓'
+                # Display key columns
+                display_cols = ['pid_tag', 'manufacturer', 'model', 'equipment_type', 
+                              'status', 'quantity', 'location', 'price']
+                display_df = df[[col for col in display_cols if col in df.columns]]
+                
+                st.dataframe(
+                    display_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "pid_tag": "P&ID Tag",
+                        "manufacturer": "Manufacturer",
+                        "model": "Model",
+                        "equipment_type": "Type",
+                        "status": "Status",
+                        "quantity": st.column_config.NumberColumn("Qty", format="%d"),
+                        "location": "Location",
+                        "price": st.column_config.NumberColumn("Unit Price", format="$%.2f")
                     }
-                    
-                    with st.expander(f"{status_emoji.get(pe['status'], '📌')} **{pe['pid_tag'] or 'No Tag'}** - {pe['manufacturer']} {pe['model']}"):
-                        col_a, col_b, col_c = st.columns(3)
-                        
-                        with col_a:
-                            st.write(f"**Status:** {pe['status']}")
-                            st.write(f"**Quantity:** {pe['quantity']}")
-                            st.write(f"**Location:** {pe['location'] or 'N/A'}")
-                        
-                        with col_b:
-                            st.write(f"**Type:** {pe['equipment_type']}")
-                            st.write(f"**Power:** {pe['power_hp']} HP" if pe['power_hp'] else "**Power:** N/A")
-                            st.write(f"**Flow:** {pe['flow_gpm']} GPM" if pe['flow_gpm'] else "**Flow:** N/A")
-                        
-                        with col_c:
-                            if pe['vendor']:
-                                st.write(f"**Vendor:** {pe['vendor']}")
-                                st.write(f"**Price:** ${pe['price']:,.2f}" if pe['price'] else "**Price:** N/A")
-                                st.write(f"**Lead Time:** {pe['lead_time_weeks']} weeks" if pe['lead_time_weeks'] else "**Lead Time:** N/A")
-                            else:
-                                st.write("**Quote:** Not assigned")
-                        
-                        if pe['instance_notes']:
-                            st.info(f"📝 {pe['instance_notes']}")
+                )
+                
+                st.caption(f"Total: {len(project_equipment)} equipment items")
             else:
-                st.info("No equipment added to this project yet. Add equipment from the master catalog!")
+                st.info("No equipment added yet. Use the form to add equipment from the master catalog.")
         
         with col2:
-            st.subheader("➕ Add Equipment to Project")
+            st.subheader("Add Equipment")
             
-            equipment_list = models.get_all_equipment(db)
+            # Get equipment master list
+            equipment_list = db['equipment'].get_all_equipment()
             
             if equipment_list:
-                with st.form("add_to_project_form", clear_on_submit=True):
-                    # Equipment selector
-                    eq_options = {f"{eq['manufacturer']} {eq['model']} ({eq['equipment_type']})": eq['equipment_id'] 
-                                 for eq in equipment_list}
+                equipment_options = {
+                    e['equipment_id']: f"{e['manufacturer']} {e['model']} ({e['equipment_type']})"
+                    for e in equipment_list
+                }
+                
+                with st.form("add_project_equipment"):
+                    selected_equipment_id = st.selectbox(
+                        "Select Equipment",
+                        options=list(equipment_options.keys()),
+                        format_func=lambda x: equipment_options[x]
+                    )
                     
-                    selected_eq = st.selectbox("Select Equipment*", options=list(eq_options.keys()))
-                    equipment_id = eq_options[selected_eq]
-                    
-                    # P&ID Tag
                     pid_tag = st.text_input("P&ID Tag*", placeholder="e.g., P-101")
                     
-                    # Status
-                    status = st.selectbox("Status*", ["new", "existing", "replace", "remove", "TBD"])
+                    status = st.selectbox(
+                        "Status",
+                        options=["new", "existing", "replace", "remove", "TBD"]
+                    )
                     
-                    # Quantity
                     quantity = st.number_input("Quantity", min_value=1, value=1, step=1)
+                    location = st.text_input("Location", placeholder="e.g., Pump Room A")
+                    notes = st.text_area("Notes")
                     
-                    # Location
-                    location = st.text_input("Location", placeholder="e.g., MBR Building")
-                    
-                    # Notes
-                    notes = st.text_area("Notes", placeholder="Installation notes or special requirements...")
-                    
-                    # Quote selection (optional)
-                    quotes = models.get_equipment_quotes(db, equipment_id)
-                    if quotes:
-                        quote_options = {f"{q['vendor']} - ${q['price']:,.2f}": q['quote_id'] 
-                                        for q in quotes if q['price']}
-                        quote_options = {"[No Quote Selected]": None, **quote_options}
-                        selected_quote = st.selectbox("Select Quote", options=list(quote_options.keys()))
-                        selected_quote_id = quote_options[selected_quote]
-                    else:
-                        st.caption("No quotes available for this equipment")
-                        selected_quote_id = None
-                    
-                    submit = st.form_submit_button("Add to Project", type="primary")
+                    submit = st.form_submit_button("➕ Add to Project", use_container_width=True)
                     
                     if submit:
                         if not pid_tag:
-                            st.error("P&ID Tag is required")
+                            st.error("Please enter a P&ID tag")
                         else:
                             try:
-                                instance_id = models.add_equipment_to_project(
-                                    db, st.session_state.active_project_id, equipment_id,
-                                    pid_tag, status, quantity,
-                                    location if location else None,
-                                    notes if notes else None,
-                                    selected_quote_id
+                                instance_id = db['project_equipment'].add_equipment_to_project(
+                                    project_id=st.session_state.active_project_id,
+                                    equipment_id=selected_equipment_id,
+                                    pid_tag=pid_tag,
+                                    status=status,
+                                    quantity=quantity,
+                                    location=location or None,
+                                    notes=notes or None
                                 )
-                                st.success(f"✅ Equipment added to project! (Instance ID: {instance_id})")
+                                st.success(f"✓ Equipment added to project (ID: {instance_id})")
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"Error adding equipment to project: {e}")
+                                st.error(f"Error adding equipment: {str(e)}")
             else:
-                st.warning("No equipment in master catalog. Add equipment first in the Equipment Master tab.")
+                st.warning("No equipment in master catalog. Add equipment in the Equipment Master tab first.")
 
-# ============================================
+# ============================================================================
 # TAB 4: COST ESTIMATE
-# ============================================
+# ============================================================================
+
 with tabs[3]:
-    st.header("💰 Project Cost Estimate")
+    st.header("💰 Cost Estimate")
     
     if not st.session_state.active_project_id:
-        st.warning("⚠️ Please select a project from the sidebar first.")
+        st.warning("⚠️ Please select a project first")
     else:
-        st.markdown(f"**Cost estimate for:** {st.session_state.active_project_name}")
-        
-        st.info("🚧 Cost estimate generation will be implemented in Phase 4")
-        st.markdown("""
-        **Planned features:**
-        - Summary by equipment type
-        - Line items with unit price × quantity
-        - Subtotals and grand total
-        - Export to formatted Excel
-        - Contingency calculations
-        """)
+        st.info("📊 Cost estimation features coming in Phase 4")
+        st.markdown("This tab will generate formatted cost estimates with:")
+        st.markdown("- Equipment pricing by category")
+        st.markdown("- Quantity × Unit Price calculations")
+        st.markdown("- Subtotals and contingencies")
+        st.markdown("- Export to formatted Excel")
 
-# ============================================
+# ============================================================================
 # TAB 5: SUBMITTAL GENERATOR
-# ============================================
+# ============================================================================
+
 with tabs[4]:
     st.header("📄 Submittal Package Generator")
     
     if not st.session_state.active_project_id:
-        st.warning("⚠️ Please select a project from the sidebar first.")
+        st.warning("⚠️ Please select a project first")
     else:
-        st.markdown(f"**Generate submittals for:** {st.session_state.active_project_name}")
-        
-        st.info("🚧 Submittal generation will be implemented in Phase 4")
-        st.markdown("""
-        **Planned features:**
-        - Select equipment from project
-        - Choose document types (cutsheet/submittal/spec)
-        - Generate combined PDF or folder structure
-        - Create transmittal cover sheet
-        - Batch export capabilities
-        """)
+        st.info("📦 Submittal generation features coming in Phase 4")
+        st.markdown("This tab will create submittal packages with:")
+        st.markdown("- Equipment cut sheets and specifications")
+        st.markdown("- Combined PDF or organized folders")
+        st.markdown("- Transmittal cover sheets")
+        st.markdown("- Automatic document assembly")
 
-# ============================================
+# ============================================================================
 # TAB 6: SETTINGS
-# ============================================
+# ============================================================================
+
 with tabs[5]:
     st.header("⚙️ Settings")
     
@@ -438,38 +444,30 @@ with tabs[5]:
     col1, col2 = st.columns(2)
     
     with col1:
-        st.write("**Database Location:**")
-        st.code(os.path.abspath(DB_PATH))
+        st.markdown("**Database Location**")
+        from database import get_db_path
+        db_path = get_db_path()
+        st.code(str(db_path))
         
-        st.write("**Database Size:**")
-        if os.path.exists(DB_PATH):
-            size_bytes = os.path.getsize(DB_PATH)
-            size_kb = size_bytes / 1024
-            st.write(f"{size_kb:.2f} KB")
+        st.markdown("**File Storage**")
+        file_path = Path("data/files")
+        st.code(str(file_path.absolute()))
     
     with col2:
-        st.write("**Actions:**")
+        st.markdown("**Database Statistics**")
+        total_projects = len(db['project'].get_all_projects())
+        total_equipment = len(db['equipment'].get_all_equipment())
         
-        if st.button("🔄 Reload Database Stats", type="secondary"):
-            st.cache_resource.clear()
-            st.rerun()
-        
-        st.warning("⚠️ Danger Zone")
-        if st.button("🗑️ Reset Database (Delete All Data)", type="secondary"):
-            st.error("This feature requires confirmation dialog (to be implemented)")
+        st.metric("Projects", total_projects)
+        st.metric("Equipment Master", total_equipment)
     
     st.markdown("---")
     
-    st.subheader("File Storage")
-    st.write("**PDF Storage Location:**")
-    st.code("data/files/")
+    st.subheader("Danger Zone")
+    st.warning("⚠️ These actions cannot be undone!")
     
-    st.write("**Export Location:**")
-    st.code("exports/")
+    if st.button("🗑️ Reset Database", type="secondary"):
+        st.error("Database reset functionality disabled in this version. Use with caution in production.")
     
     st.markdown("---")
-    
-    st.subheader("About")
-    st.write("**WWTP Equipment Tool** - Version 0.1.0")
-    st.write("Internal engineering tool for wastewater treatment plant equipment management")
-    st.caption("Built with Streamlit + SQLite")
+    st.caption("WWTP Equipment Tool v1.0 | Phase 1 - Foundation")
